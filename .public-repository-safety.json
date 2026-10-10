@@ -1,16 +1,59 @@
 {
   "schema_version": 1,
   "repository": "psydigital/block-content-bridge",
-  "public_refs": { "branches": ["refs/heads/main"], "tag_patterns": ["^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$"] },
-  "public_identities": { "email_patterns": ["^hello@psydigital\\.co\\.uk$"] },
-  "path_exceptions": [],
-  "synthetic_exceptions": [],
-  "ci": { "workflow": ".github/workflows/public-repository-safety.yml", "check": "Public repository safety" },
-  "protection": {
-    "branches": ["main"], "tag_patterns": ["v*"],
-    "require_pull_request": true, "require_current_branch": true,
-    "require_conversation_resolution": true, "deny_force_push": true, "deny_deletion": true
+  "public_refs": {
+    "branches": [
+      "refs/heads/main"
+    ],
+    "tag_patterns": [
+      "^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    ]
   },
-  "manual_documents": ["README.md", "docs/testing.md", "LICENSE"],
-  "tools": { "gitleaks": "8.30.1" }
+  "public_identities": {
+    "email_patterns": [
+      "^hello@psydigital\\.co\\.uk$"
+    ]
+  },
+  "path_exceptions": [],
+  "synthetic_exceptions": [
+    {
+      "rule_id": "private.email",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "618a35eb4f4caf86f6246132d96ab960ed6ceaeba393e88ab1dbb0a481e43a3d",
+      "rationale": "Verified public GitHub SSH transport literal in the managed scanner; no personal address or credential is present.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "private.hostname",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "618a35eb4f4caf86f6246132d96ab960ed6ceaeba393e88ab1dbb0a481e43a3d",
+      "rationale": "Verified regex false positive on the match.group function call in the managed hostname detector.",
+      "agent_material": false
+    }
+  ],
+  "ci": {
+    "workflow": ".github/workflows/public-repository-safety.yml",
+    "check": "Public repository safety"
+  },
+  "protection": {
+    "branches": [
+      "main"
+    ],
+    "tag_patterns": [
+      "v*"
+    ],
+    "require_pull_request": true,
+    "require_current_branch": true,
+    "require_conversation_resolution": true,
+    "deny_force_push": true,
+    "deny_deletion": true
+  },
+  "manual_documents": [
+    "README.md",
+    "docs/testing.md",
+    "LICENSE"
+  ],
+  "tools": {
+    "gitleaks": "8.30.1"
+  }
 }
