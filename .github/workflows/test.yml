@@ -40,8 +40,15 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          tools: wp-cli
+          tools: none
           coverage: none
+      - name: Install WP-CLI
+        run: |
+          curl --fail --silent --show-error --location --retry 3 https://github.com/wp-cli/wp-cli/releases/download/v2.12.0/wp-cli-2.12.0.phar --output "$RUNNER_TEMP/wp"
+          echo 'ce34ddd838f7351d6759068d09793f26755463b4a4610a5a5c0a97b68220d85c  '"$RUNNER_TEMP/wp" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/wp"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          php "$RUNNER_TEMP/wp" --version
       - run: npm ci --ignore-scripts
       - run: npm test
       - name: PHP syntax
