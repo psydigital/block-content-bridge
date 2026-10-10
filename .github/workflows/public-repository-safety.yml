@@ -16,6 +16,11 @@ jobs:
           persist-credentials: false
       - name: Remove checkout-installed Git LFS filters
         run: git config --local --remove-section filter.lfs
+      - name: Make the declared public branch available for tag checkouts
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/main; then
+            git branch --no-track main refs/remotes/origin/main
+          fi
       - name: Install pinned Gitleaks
         env:
           GITLEAKS_VERSION: 8.30.1
