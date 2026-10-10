@@ -24,7 +24,7 @@ try {
     }
     fs.mkdirSync(path.dirname(output), { recursive: true });
     fs.rmSync(output, { force: true });
-    execFileSync('zip', ['-X', '-q', output, ...files.sort().map(file => `${slug}/${file}`)], { cwd: stage });
+    execFileSync('zip', ['-X', '-q', output, ...files.sort().map(file => `${slug}/${file}`)], { cwd: stage, env: { ...process.env, TZ: 'UTC' } });
     const checksum = crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex');
     fs.writeFileSync(`${output}.sha256`, `${checksum}  ${path.basename(output)}\n`);
     console.log(`Created dist/${path.basename(output)} (${fs.statSync(output).size} bytes)`);
