@@ -1,0 +1,71 @@
+name: Tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Plugin tests (${{ matrix.wordpress }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wordpress: '6.6.4'
+            php: '8.1'
+            yoast: '24.6'
+            theme: twentytwentyfour
+          - wordpress: '7.1.3'
+            php: '8.3'
+            yoast: '28.6'
+            theme: twentytwentyfive
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: block_bridge_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping" --health-interval=10s
+          --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: wp-cli
+          coverage: none
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: PHP syntax
+        run: find includes tests/fixtures -name '*.php' -exec php -l {} \; && php -l block-content-bridge.php && php -l uninstall.php
+      - name: Disposable WordPress
+        run: |
+          mkdir -p .runtime/wordpress
+          wp core download --path=.runtime/wordpress --skip-content --version=${{ matrix.wordpress }}
+          wp config create --path=.runtime/wordpress --dbname=block_bridge_test --dbuser=root --dbhost=127.0.0.1
+          wp config set PSY_BCB_TEST_SITE true --raw --path=.runtime/wordpress
+          node scripts/install-test-site.mjs
+          wp plugin install wordpress-seo --version=${{ matrix.yoast }} --activate --path=.runtime/wordpress
+          wp plugin install acf-content-analysis-for-yoast-seo --version=3.2 --path=.runtime/wordpress
+          wp theme install ${{ matrix.theme }} --version=1.0 --activate --path=.runtime/wordpress
+          ln -s "$PWD" .runtime/wordpress/wp-content/plugins/block-content-bridge
+          wp plugin activate block-content-bridge --path=.runtime/wordpress
+      - run: wp eval-file tests/wp-integration.php --path=.runtime/wordpress
+      - run: npx playwright install --with-deps chromium
+      - name: Browser integration
+        run: |
+          wp server --host=127.0.0.1 --port=8876 --path=.runtime/wordpress > .runtime/server.log 2>&1 &
+          npm run test:browser
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-zip-${{ matrix.wordpress }}
+          path: dist/*

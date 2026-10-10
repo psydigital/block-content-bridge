@@ -1,0 +1,10 @@
+{
+  "apiVersion": 3,
+  "name": "studio/card",
+  "title": "Analysis test card",
+  "category": "text",
+  "acf": {
+    "blockVersion": 3,
+    "renderTemplate": "render.php"
+  }
+}
