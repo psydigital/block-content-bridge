@@ -58,4 +58,9 @@ test('a custom-namespace ACF v3 block renders unsaved text inside an iframe edit
     const analysis = await page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback'));
     expect(analysis.match(/Unsaved ACF heading/g)).toHaveLength(1);
     expect(analysis).toContain('alt="Example project photo"');
+    await page.evaluate(() => wp.data.dispatch('core/block-editor').selectBlock(wp.data.select('core/block-editor').getBlocks()[0].innerBlocks[0].clientId));
+    await page.getByRole('tab', { name: 'Block', exact: true }).click();
+    await page.getByLabel('Copy', { exact: true }).fill('Edited through the ACF field');
+    await page.getByLabel('Copy', { exact: true }).press('Tab');
+    await expect.poll(() => page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback')), { timeout: 15000 }).toContain('Edited through the ACF field');
 });
