@@ -22,6 +22,7 @@ test('real editor supplies fresh semantic block HTML to Yoast and clears removed
     await page.getByRole('button', { name: 'View collected content', exact: true }).click();
     await expect(page.getByLabel('Collected HTML')).toHaveValue(/<h2>A sample heading<\/h2>/);
     await expect(page.getByLabel('Collected HTML')).toHaveValue(/href="https:\/\/example.org"/);
+    await expect.poll(() => page.evaluate(() => wp.data.select('yoast-seo/editor').getResultsForFocusKeyword()?.results?.find(result => result._identifier === 'textLength')?.text || ''), { timeout: 15000 }).toMatch(/contains [1-9][\d,]* words/);
     await page.evaluate(() => wp.data.dispatch('core/block-editor').resetBlocks([]));
     await expect(page.getByText('Analysis content is up to date.', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Collected HTML')).toHaveValue('');
@@ -30,6 +31,7 @@ test('real editor supplies fresh semantic block HTML to Yoast and clears removed
         return YoastSEO.app.pluggable._applyModifications('content', 'Native fallback');
     });
     expect(analysis).toBe('');
+    await expect.poll(() => page.evaluate(() => wp.data.select('yoast-seo/editor').getResultsForFocusKeyword()?.results?.find(result => result._identifier === 'textLength')?.text || ''), { timeout: 15000 }).toContain('contains 0 words');
 });
 
 test('a custom-namespace ACF v3 block renders unsaved text inside an iframe editor', async ({ page }) => {
@@ -52,7 +54,8 @@ test('a custom-namespace ACF v3 block renders unsaved text inside an iframe edit
     await expect(panel).toBeVisible();
     if (await panel.getAttribute('aria-expanded') !== 'true') await panel.click();
     await expect(page.getByText('Analysis content is up to date.', { exact: true })).toBeVisible();
-    await expect(page.locator('iframe[name="editor-canvas"]')).toBeVisible();
+    await expect(page.frameLocator('iframe[name="editor-canvas"]').locator('.acf-block-preview h2')).toHaveText('Unsaved ACF heading');
+    await expect(page.locator('.acf-block-preview')).toHaveCount(0);
     await page.getByRole('button', { name: 'View collected content', exact: true }).click();
     await expect(page.getByLabel('Collected HTML')).toHaveValue(/<h2>Unsaved ACF heading<\/h2>/);
     const analysis = await page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback'));

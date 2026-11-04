@@ -35,6 +35,8 @@ BCB_TEST_URL=http://127.0.0.1:8876 BCB_TEST_USER=bridge-admin BCB_TEST_PASSWORD=
 
 For ACF coverage, install your own ACF Pro copy and install `tests/fixtures/` as a separate test plugin. Activate both. The fixture defines `studio/card`, an ACF v3 block with a custom namespace. Without that fixture, the ACF browser test explicitly skips; a passing core test is not ACF compatibility evidence.
 
+Install ACF Content Analysis for Yoast SEO 3.2, initially inactive, to run the coexistence test on WordPress 7.1+. It checks separate metabox fields, unsaved ACF edits, single inclusion and fallback when an outer preview would overlap the add-on's collector. Run the PHP suite with that add-on inactive to exercise version boundaries. CI cannot exercise ACF Pro blocks without a separately supplied licensed copy.
+
 Tests edit synthetic unsaved drafts and exercise Yoast's registered analysis modification in the real editor. They never publish posts. Do not run them against a live content site.
 
 ## Release checks

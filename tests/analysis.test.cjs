@@ -37,6 +37,26 @@ test('invalid selectors produce an actionable error rather than partial analysis
     assert.throws(() => window.PsyBlockBridge.cleanHTML('<p>Content</p>', ['[']), /selector/i);
 });
 
+test('link relationship metadata survives cleaning for accurate outbound-link analysis', () => {
+    const window = load();
+    const html = window.PsyBlockBridge.cleanHTML('<p><a href="https://example.org" rel="nofollow sponsored ugc noopener" onclick="alert(1)">Reference</a></p>', []);
+    const link = new JSDOM(html).window.document.querySelector('a');
+    assert.equal(link.getAttribute('rel'), 'nofollow sponsored ugc noopener');
+    assert.equal(link.getAttribute('href'), 'https://example.org');
+    assert.equal(link.hasAttribute('onclick'), false);
+});
+
+test('sharing with the ACF collector requires a separate canvas and no outer block previews', () => {
+    const window = load();
+    assert.equal(typeof window.PsyBlockBridge.canShareWithACF, 'function');
+    assert.equal(window.PsyBlockBridge.canShareWithACF(), false);
+    window.document.body.innerHTML = '<div class="metabox-location-normal"><input value="Separate field"></div><iframe name="editor-canvas"></iframe>';
+    window.document.querySelector('iframe').contentDocument.body.innerHTML = '<div class="acf-block-component acf-block-body acf-block-preview">Block content</div>';
+    assert.equal(window.PsyBlockBridge.canShareWithACF(), true);
+    window.document.body.insertAdjacentHTML('beforeend', '<div class="acf-block-component acf-block-body">Editable block fields</div>');
+    assert.equal(window.PsyBlockBridge.canShareWithACF(), false);
+});
+
 test('unsafe link protocols are omitted and inspector content stays inert', () => {
     const window = load();
     assert.equal(typeof window.PsyBlockBridge?.cleanHTML, 'function');

@@ -6,7 +6,7 @@ By **Psy Digital** · [hello@psydigital.co.uk](mailto:hello@psydigital.co.uk)
 
 ## Install
 
-1. Download **`block-content-bridge-0.1.0.zip`** from [GitHub Releases](https://github.com/psydigital/block-content-bridge/releases). Use the plugin ZIP asset, rather than GitHub's source-code archive.
+1. Obtain **`block-content-bridge-0.1.1.zip`** from your administrator or [GitHub Releases](https://github.com/psydigital/block-content-bridge/releases), when published. Use the plugin ZIP asset, rather than GitHub's source-code archive.
 2. In WordPress, go to **Plugins → Add New Plugin → Upload Plugin** and select the ZIP.
 3. Activate it, then open a post or page in the block editor.
 4. Open **Block Content Bridge** in the document sidebar. Automatic analysis starts after you pause editing.
@@ -40,8 +40,8 @@ The editor panel provides **Refresh analysis**, collection status and **View col
 
 ## Compatibility and limits
 
-- **ACF Content Analysis for Yoast SEO:** the bridge pauses while that add-on is active. Choose one collector. This plugin handles rendered post blocks, not separate custom-field metaboxes or taxonomy fields. Do not deactivate another collector if you depend on those features without comparing results first.
-- **Other custom Yoast integrations:** this plugin replaces the `content` input at priority 5. Later content filters still run. Check the final analysis if another integration replaces or appends content.
+- **ACF Content Analysis for Yoast SEO:** version 3.2 may run alongside this bridge on WordPress 7.1+. The bridge supplies rendered blocks; the add-on retains its separate-field collection. Sharing pauses if block previews or block field containers appear outside the editor iframe. Other add-on versions and older WordPress versions pause the bridge until compatibility has been checked. Taxonomy fields remain the add-on's responsibility.
+- **Other custom Yoast integrations:** this plugin replaces the `content` input at priority 5. Later content filters still run. Retire any older block collector when enabling the bridge to prevent duplication. A theme can check `window.psyBlockBridgeSettings.ownsBlockAnalysis` at DOM ready to yield block collection to the bridge on eligible editor screens.
 - **Content source:** unsaved values must be present in the editor's serialized block content. Unsaved values held only in custom-field metaboxes or post-meta-backed blocks are outside this release's coverage.
 - **Rendering context:** templates run in a REST request with the current post. Blocks that depend on frontend-only query state, JavaScript output or third-party content filters can differ from the public page. Full theme headers and footers are outside the analysed document.
 - **Limits:** 1 MB of source content, 1,000 rendered block instances, 5 MB of rendered HTML and a 20-second browser wait. A timed-out server render may finish on the server, but its result is ignored.
@@ -70,3 +70,10 @@ Report reproducible bugs through [GitHub Issues](https://github.com/psydigital/b
 Security reports: [hello@psydigital.co.uk](mailto:hello@psydigital.co.uk).
 
 GPL-3.0-or-later. This independent plugin is not affiliated with Yoast or Advanced Custom Fields.
+
+## Changes in 0.1.1
+
+- Allow verified sharing with ACF Content Analysis 3.2 in the WordPress 7.1 iframe editor, retaining separate metabox fields.
+- Pause sharing when block fields or previews return to the outer document.
+- Preserve link `rel` values so Yoast can distinguish followed and nofollow links.
+- Expose an editor ownership flag for retiring a theme's older block collector.

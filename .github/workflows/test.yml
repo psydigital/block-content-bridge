@@ -16,9 +16,9 @@ jobs:
             php: '8.1'
             yoast: '24.6'
             theme: twentytwentyfour
-          - wordpress: '7.1.3'
-            php: '8.3'
-            yoast: '28.6'
+          - wordpress: '7.1.4'
+            php: '8.2'
+            yoast: '28.8'
             theme: twentytwentyfive
     services:
       mysql:
@@ -65,7 +65,7 @@ jobs:
           ln -s "$PWD" .runtime/wordpress/wp-content/plugins/block-content-bridge
           wp plugin activate block-content-bridge --path=.runtime/wordpress
       - name: Optional collector compatibility
-        if: matrix.wordpress == '7.1.3'
+        if: matrix.wordpress == '7.1.4'
         run: wp plugin install acf-content-analysis-for-yoast-seo --version=3.2 --path=.runtime/wordpress
       - run: wp eval-file tests/wp-integration.php --path=.runtime/wordpress
       - run: npx playwright install --with-deps chromium

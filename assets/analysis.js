@@ -32,7 +32,7 @@
             }
             for (const attribute of Array.from(element.attributes)) {
                 const name = attribute.name.toLowerCase();
-                const keep = (tag === 'a' && name === 'href' && safeURL(attribute.value)) ||
+                const keep = (tag === 'a' && ((name === 'href' && safeURL(attribute.value)) || name === 'rel')) ||
                     (tag === 'img' && ((name === 'src' && safeURL(attribute.value)) || name === 'alt')) ||
                     name === 'lang';
                 if (!keep) element.removeAttribute(attribute.name);
@@ -43,6 +43,12 @@
         while (walker.nextNode()) comments.push(walker.currentNode);
         comments.forEach(comment => comment.remove());
         return template.innerHTML.trim();
+    }
+
+    // ACF's separate-field collector must not see the same block fields or previews.
+    function canShareWithACF() {
+        return !!global.document.querySelector('iframe[name="editor-canvas"]') &&
+            !global.document.querySelector('.acf-block-component.acf-block-body, .acf-block-preview');
     }
 
     function createController({ render, selectors, onChange, timeoutMs = 20000 }) {
@@ -99,5 +105,5 @@
         };
     }
 
-    global.PsyBlockBridge = { cleanHTML, createController };
+    global.PsyBlockBridge = { cleanHTML, createController, canShareWithACF };
 })(window);

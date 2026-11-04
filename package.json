@@ -1,6 +1,6 @@
 {
   "name": "block-content-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Rendered block content for Yoast SEO analysis.",
   "author": "Psy Digital <hello@psydigital.co.uk>",

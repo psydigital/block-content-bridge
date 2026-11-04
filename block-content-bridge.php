@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Block Content Bridge
  * Description: Supplies rendered block-editor content to Yoast SEO analysis, including dynamic ACF blocks.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Author: Psy Digital
  * Author URI: https://psydigital.co.uk
  * Plugin URI: https://github.com/psydigital/block-content-bridge
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const FILE = __FILE__;
 
 require_once __DIR__ . '/includes/Settings.php';

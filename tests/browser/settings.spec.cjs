@@ -43,22 +43,56 @@ test('saved manual mode and selector exclusions change the real analysis', async
     }
 });
 
-test('the official ACF collector is detected and the bridge does not overwrite its analysis', async ({ page }) => {
+test('the official ACF collector retains separate fields while the bridge supplies blocks once', async ({ page }) => {
     await login(page);
     await page.goto('/wp-admin/plugins.php');
     const row = page.locator('tr[data-slug="acf-content-analysis-for-yoast-seo"]');
     test.skip(!(await row.count()), 'Requires the official ACF Content Analysis add-on.');
-    await row.getByRole('link', { name: /^Activate ACF Content Analysis/ }).click();
+    const activate = row.getByRole('link', { name: /^Activate ACF Content Analysis/ });
+    if (await activate.count()) await activate.click();
     try {
         await page.goto('/wp-admin/post-new.php');
         await page.waitForFunction(() => window.wp?.data?.select('core/editor')?.getCurrentPostId());
+        test.skip(!await page.evaluate(() => !!wp.blocks.getBlockType('studio/card')), 'Requires ACF Pro and the fixture plugin.');
         await page.evaluate(() => wp.data.dispatch('core/preferences').set('core/edit-post', 'welcomeGuide', false));
         const panel = page.getByRole('button', { name: 'Block Content Bridge', exact: true });
         await expect(panel).toBeVisible();
         if (await panel.getAttribute('aria-expanded') !== 'true') await panel.click();
-        await expect(page.locator('.components-notice__content').filter({ hasText: 'Analysis is paused because ACF Content Analysis for Yoast SEO is active' })).toBeVisible();
+        await page.evaluate(() => wp.data.dispatch('core/block-editor').resetBlocks(wp.blocks.parse('<!-- wp:studio/card {"name":"studio/card","data":{"copy":"Unique block copy","_copy":"field_bcb_copy"},"mode":"preview"} /--><!-- wp:paragraph --><p>A native paragraph.</p><!-- /wp:paragraph -->')));
+        const metaBoxes = page.getByRole('button', { name: 'Meta Boxes', exact: true });
+        if (await metaBoxes.getAttribute('aria-expanded') === 'false') await metaBoxes.press('Enter');
+        await expect(page.getByLabel('Additional copy', { exact: true })).toBeVisible();
+        await page.getByLabel('Additional copy', { exact: true }).fill('Separate metabox copy');
+        await expect(page.getByText('Analysis content is up to date.', { exact: true })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback'))).toContain('Separate metabox copy');
         const html = await page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback'));
-        expect(html).toContain('Native fallback');
+        expect(html.match(/Unique block copy/g)).toHaveLength(1);
+        expect(html.match(/Separate metabox copy/g)).toHaveLength(1);
+        expect(html).toContain('A native paragraph.');
+        expect(html).not.toContain('Native fallback');
+        await page.evaluate(() => wp.data.dispatch('core/block-editor').selectBlock(wp.data.select('core/block-editor').getBlocks()[0].clientId));
+        await page.getByRole('tab', { name: 'Block', exact: true }).click();
+        await page.getByLabel('Copy', { exact: true }).fill('Edited block copy');
+        await page.getByLabel('Copy', { exact: true }).press('Tab');
+        await expect.poll(() => page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback')), { timeout: 15000 }).toContain('Edited block copy');
+        const edited = await page.evaluate(() => YoastSEO.app.pluggable._applyModifications('content', 'Native fallback'));
+        expect(edited.match(/Edited block copy/g)).toHaveLength(1);
+        expect(edited.match(/Separate metabox copy/g)).toHaveLength(1);
+        expect(edited).not.toContain('Unique block copy');
+        const fallback = await page.evaluate(() => {
+            const preview = document.createElement('div');
+            preview.className = 'acf-block-preview';
+            document.body.appendChild(preview);
+            const block = wp.data.select('core/block-editor').getBlocks()[0];
+            wp.data.dispatch('core/block-editor').updateBlockAttributes(block.clientId, { data: { ...block.attributes.data, copy: 'Edit while sharing is paused' } });
+            const content = YoastSEO.app.pluggable._applyModifications('content', 'Native fallback');
+            preview.remove();
+            const resumed = YoastSEO.app.pluggable._applyModifications('content', 'Native fallback');
+            return { content, resumed };
+        });
+        expect(fallback.content).toContain('Native fallback');
+        expect(fallback.content).not.toContain('Edited block copy');
+        expect(fallback.resumed).not.toContain('Edited block copy');
     } finally {
         page.on('dialog', dialog => dialog.accept());
         await page.goto('/wp-admin/plugins.php');
