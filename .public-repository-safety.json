@@ -7,14 +7,34 @@
     ],
     "tag_patterns": [
       "^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    ],
+    "review_branches": [
+      "refs/heads/review/yoast-0.1.1"
     ]
   },
   "public_identities": {
     "email_patterns": [
-      "^hello@psydigital\\.co\\.uk$"
+      "^hello@psydigital\\.co\\.uk$",
+      "^noreply@github\\.com$",
+      "^82805362\\+psydigital@users\\.noreply\\.github\\.com$"
     ]
   },
-  "path_exceptions": [],
+  "path_exceptions": [
+    {
+      "rule_id": "github.release",
+      "path": "github/releases",
+      "sha256": "4540b67d6f6169094d5d910436624ad8dbbaf80b44ce9286d5384317c39315da",
+      "rationale": "Reviewed the public 0.1.0 release metadata and both asset digests. Every ZIP member matches the public v0.1.0 tag; the checksum asset matches the downloaded ZIP.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "github.artifact",
+      "path": "github/actions/artifacts",
+      "sha256": "df03be7a38c56fde008bad5d27245970013493551a8e2d2b8e13f45cc672b6e4",
+      "rationale": "Downloaded all eleven retained CI artifacts, verified each API digest and nested ZIP checksum, and compared every runtime member with its recorded public source commit.",
+      "agent_material": false
+    }
+  ],
   "synthetic_exceptions": [
     {
       "rule_id": "private.email",
@@ -27,6 +47,20 @@
       "rule_id": "private.hostname",
       "path": ".github/scripts/public-repository-safety.py",
       "sha256": "618a35eb4f4caf86f6246132d96ab960ed6ceaeba393e88ab1dbb0a481e43a3d",
+      "rationale": "Verified regex false positive on the match.group function call in the managed hostname detector.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "private.email",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "17624ff7ba51a047b4a5480148116e32453c5ba5eb1f9228e1c320a61e0fcbde",
+      "rationale": "Verified public GitHub SSH transport literal in the managed scanner; no personal address or credential is present.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "private.hostname",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "17624ff7ba51a047b4a5480148116e32453c5ba5eb1f9228e1c320a61e0fcbde",
       "rationale": "Verified regex false positive on the match.group function call in the managed hostname detector.",
       "agent_material": false
     }

@@ -16,11 +16,24 @@ jobs:
           persist-credentials: false
       - name: Remove checkout-installed Git LFS filters
         run: git config --local --remove-section filter.lfs
-      - name: Make the declared public branch available for tag checkouts
+      - name: Prepare declared public refs
         run: |
-          if ! git show-ref --verify --quiet refs/heads/main; then
-            git branch --no-track main refs/remotes/origin/main
-          fi
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          refs = json.loads(Path('.public-repository-safety.json').read_text())['public_refs']
+          for ref in refs['branches'] + refs.get('review_branches', []):
+              if not isinstance(ref, str) or not ref.startswith('refs/heads/'):
+                  raise SystemExit('Invalid declared branch')
+              subprocess.run(['git', 'check-ref-format', ref], check=True)
+              present = subprocess.run(['git', 'show-ref', '--verify', '--quiet', ref])
+              if present.returncode == 1:
+                  source = 'refs/remotes/origin/' + ref.removeprefix('refs/heads/')
+                  subprocess.run(['git', 'branch', '--no-track', ref.removeprefix('refs/heads/'), source], check=True)
+              elif present.returncode != 0:
+                  raise SystemExit('Unable to inspect declared branch')
+          PY
       - name: Install pinned Gitleaks
         env:
           GITLEAKS_VERSION: 8.30.1
