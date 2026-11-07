@@ -33,6 +33,20 @@
       "sha256": "df03be7a38c56fde008bad5d27245970013493551a8e2d2b8e13f45cc672b6e4",
       "rationale": "Downloaded all eleven retained CI artifacts, verified each API digest and nested ZIP checksum, and compared every runtime member with its recorded public source commit.",
       "agent_material": false
+    },
+    {
+      "rule_id": "github.pull-request",
+      "path": "github/pulls",
+      "sha256": "fe733eeb2f4e6a926117438291ef8cb7786f6fab4c98b499cbb5c943a4871f2b",
+      "rationale": "Reviewed the complete public listing for PR 1, including its author, title, body and linked commit metadata. It describes this plugin update and contains no private material.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "github.issue",
+      "path": "github/issues",
+      "sha256": "8b01b9cfda6af2208ea5bbca6e8f1960980dcf0a842bda729aaf6b8530222f78",
+      "rationale": "Reviewed the complete public listing for PR 1, including its author, title, body and linked commit metadata. It describes this plugin update and contains no private material.",
+      "agent_material": false
     }
   ],
   "synthetic_exceptions": [
@@ -61,6 +75,20 @@
       "rule_id": "private.hostname",
       "path": ".github/scripts/public-repository-safety.py",
       "sha256": "17624ff7ba51a047b4a5480148116e32453c5ba5eb1f9228e1c320a61e0fcbde",
+      "rationale": "Verified regex false positive on the match.group function call in the managed hostname detector.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "private.email",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "bf6f2ad5515bc0292c6de14c9876ad5dd0dbc254a6804d64030149fcda8e767e",
+      "rationale": "Verified public GitHub SSH transport literal in the managed scanner; no personal address or credential is present.",
+      "agent_material": false
+    },
+    {
+      "rule_id": "private.hostname",
+      "path": ".github/scripts/public-repository-safety.py",
+      "sha256": "bf6f2ad5515bc0292c6de14c9876ad5dd0dbc254a6804d64030149fcda8e767e",
       "rationale": "Verified regex false positive on the match.group function call in the managed hostname detector.",
       "agent_material": false
     }

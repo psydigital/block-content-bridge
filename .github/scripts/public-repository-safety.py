@@ -2946,7 +2946,10 @@ def _surface_findings(
             _add_github_finding(
                 findings, "github.review", "github-surface"
             )
-    if pulls:
+    if pulls and not _excepted(
+        policy, "github.pull-request", "github/pulls",
+        canonical_json(pulls), agent_material=False,
+    ):
         _add_github_finding(
             findings, "github.pull-request", "github-surface"
         )
@@ -2954,7 +2957,15 @@ def _surface_findings(
         values = _identity_items(
             _gh_list(repository, endpoint, runner), identity
         )
-        if values and not (rule_id == "github.release" and _release_reviewed(values, policy)):
+        reviewed = (
+            rule_id == "github.release" and _release_reviewed(values, policy)
+        ) or (
+            rule_id == "github.issue" and _excepted(
+                policy, rule_id, "github/issues", canonical_json(values),
+                agent_material=False,
+            )
+        )
+        if values and not reviewed:
             _add_github_finding(
                 findings, rule_id, "github-surface"
             )
@@ -6547,7 +6558,7 @@ permissions:
 jobs:
   safety:
     name: Public repository safety
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
