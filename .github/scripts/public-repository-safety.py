@@ -81,6 +81,7 @@ class Policy:
     protected_tag_patterns: tuple[str, ...]
     manual_documents: tuple[str, ...]
     gitleaks_version: str
+    review_branches: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -448,7 +449,7 @@ def load_policy(path: Path) -> Policy:
     ):
         if not isinstance(value, dict):
             raise PolicyError(f"{context} must be an object")
-    _keys(refs, {"branches", "tag_patterns"}, "public_refs")
+    _keys(refs, {"branches", "review_branches", "tag_patterns"}, "public_refs")
     _keys(identities, {"email_patterns"}, "public_identities")
     _keys(ci, {"workflow", "check"}, "ci")
     _keys(protection, {
@@ -466,6 +467,18 @@ def load_policy(path: Path) -> Policy:
         raise PolicyError("public branch is invalid")
     if len(branches) != len(set(branches)):
         raise PolicyError("public branches must be a non-empty unique array")
+    review_branches = refs.get("review_branches", [])
+    if (
+        not isinstance(review_branches, list)
+        or not all(
+            isinstance(ref, str)
+            and re.fullmatch(r"refs/heads/[A-Za-z0-9._/-]+", ref)
+            for ref in review_branches
+        )
+        or len(review_branches) != len(set(review_branches))
+        or set(review_branches) & set(branches)
+    ):
+        raise PolicyError("review branches must be exact, unique, and unprotected")
     if not isinstance(tag_patterns, list):
         raise PolicyError("tag patterns must be a unique array")
     if not all(isinstance(pattern, str) and len(pattern) <= 240 for pattern in tag_patterns):
@@ -544,11 +557,11 @@ def load_policy(path: Path) -> Policy:
     if tools != {"gitleaks": "8.30.1"}:
         raise PolicyError("gitleaks version must equal 8.30.1")
     return Policy(
-        1, repository, tuple(branches), tuple(tag_patterns), tuple(email_patterns),
+        1, repository, tuple(branches + review_branches), tuple(tag_patterns), tuple(email_patterns),
         _exceptions(raw["path_exceptions"], "path_exceptions"),
         _exceptions(raw["synthetic_exceptions"], "synthetic_exceptions"),
         ci["workflow"], ci["check"], tuple(protected_branches),
-        tuple(protected_tags), documents, tools["gitleaks"]
+        tuple(protected_tags), documents, tools["gitleaks"], tuple(review_branches)
     )
 
 
@@ -1697,6 +1710,7 @@ def _github_result(
     runner: Runner,
     *,
     limit: int = GITHUB_MAX_RESPONSE_BYTES,
+    allow_no_code_analysis: bool = False,
 ) -> bytes:
     if (
         not arguments
@@ -1714,6 +1728,22 @@ def _github_result(
         result = runner(tuple(arguments), None, github_environment())
     except OSError:
         raise AuditInputError("GitHub surface inspection failed") from None
+    if (
+        allow_no_code_analysis
+        and isinstance(result, CommandResult)
+        and result.returncode == 1
+        and isinstance(result.stdout, bytes)
+        and 0 < len(result.stdout) <= limit
+        and _github_json_payload(result.stdout) == {
+            "message": "no analysis found",
+            "status": "404",
+            "documentation_url": (
+                "https://docs.github.com/rest/code-scanning/code-scanning"
+                "#list-code-scanning-alerts-for-a-repository"
+            ),
+        }
+    ):
+        return b"[]"
     if (
         not isinstance(result, CommandResult)
         or type(result.returncode) is not int
@@ -1786,6 +1816,10 @@ def _gh_list(
             ),
             runner,
             limit=GITHUB_PAGE_RESPONSE_LIMIT,
+            allow_no_code_analysis=(
+                page_number == 1
+                and endpoint.startswith("/code-scanning/alerts?")
+            ),
         )
         page = _github_json_payload(payload)
         try:
@@ -2389,12 +2423,7 @@ def _github_controls(
     tags = _github_tags(
         _gh_list(repository, "/tags?per_page=100", runner)
     )
-    intended_branches = tuple(
-        sorted(
-            ref.removeprefix("refs/heads/")
-            for ref in policy.public_branches
-        )
-    )
+    intended_branches = tuple(sorted(policy.protected_branches))
     protections: list[tuple[str, object]] = []
     branch_protected = True
     branch_producers: list[int] = []
@@ -2546,6 +2575,7 @@ def _zip_has_exact_end(payload: bytes) -> bool:
 def _scan_action_log_entry(entry) -> bool:
     overlap = b""
     total = 0
+    matched = False
     while True:
         chunk = entry.read(ACTION_LOG_READ_CHUNK_BYTES)
         if not chunk:
@@ -2555,10 +2585,16 @@ def _scan_action_log_entry(entry) -> bool:
             raise AuditInputError("GitHub Actions log entry is oversized")
         normalized = re.sub(rb"\s+", b" ", chunk)
         window = overlap + normalized
-        if any(pattern.search(window) for pattern in ACTION_LOG_MARKERS):
-            return True
+        # Docker prints this public boolean with a closing quote, which the
+        # generic password detector would otherwise treat as a credential.
+        credential_window = re.sub(
+            rb"\bMYSQL_ALLOW_EMPTY_PASSWORD\s*[:=]\s*yes[\"']?(?=\s|$)",
+            b"", window, flags=re.IGNORECASE,
+        )
+        if any(pattern.search(credential_window) for pattern in ACTION_LOG_MARKERS):
+            matched = True
         overlap = window[-ACTION_LOG_SCAN_OVERLAP_BYTES:]
-    return False
+    return matched
 
 
 def _scan_action_log_archive(payload: bytes) -> bool:
@@ -2812,6 +2848,64 @@ def _commit_identity_findings(
     ]
 
 
+def _release_review_payload(values: Sequence[dict[str, object]]) -> bytes:
+    reviewed = []
+    for release in values:
+        assets = release.get("assets")
+        if not isinstance(assets, list) or len(assets) > GITHUB_MAX_ITEMS:
+            raise AuditInputError("GitHub release asset inventory is incomplete")
+        normalized_assets = []
+        for asset in assets:
+            if (
+                not isinstance(asset, dict)
+                or not _positive_integer(asset.get("id"))
+                or not isinstance(asset.get("digest"), str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", asset["digest"]) is None
+            ):
+                raise AuditInputError("GitHub release asset digest is unavailable")
+            # Downloads do not change published bytes; all other metadata is bound.
+            normalized_assets.append({
+                key: value for key, value in asset.items() if key != "download_count"
+            })
+        reviewed.append({**release, "assets": normalized_assets})
+    return canonical_json(reviewed)
+
+
+def _release_reviewed(values: Sequence[dict[str, object]], policy: Policy) -> bool:
+    if not any(
+        item.rule_id == "github.release" and item.path == "github/releases"
+        for item in policy.path_exceptions
+    ):
+        return False
+    return _excepted(
+        policy, "github.release", "github/releases",
+        _release_review_payload(values), agent_material=False,
+    )
+
+
+def _artifacts_reviewed(values: Sequence[dict[str, object]], policy: Policy) -> bool:
+    if not any(
+        item.rule_id == "github.artifact" and item.path == "github/actions/artifacts"
+        for item in policy.path_exceptions
+    ):
+        return False
+    for artifact in values:
+        workflow = artifact.get("workflow_run")
+        if (
+            not isinstance(artifact.get("digest"), str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"]) is None
+            or not _positive_integer(artifact.get("size_in_bytes"))
+            or artifact.get("expired") is not False
+            or not isinstance(workflow, dict)
+            or not _valid_github_sha(workflow.get("head_sha"))
+        ):
+            raise AuditInputError("GitHub artifact review evidence is incomplete")
+    return _excepted(
+        policy, "github.artifact", "github/actions/artifacts",
+        canonical_json(values), agent_material=False,
+    )
+
+
 def _surface_findings(
     repository: str,
     policy: Policy,
@@ -2852,7 +2946,10 @@ def _surface_findings(
             _add_github_finding(
                 findings, "github.review", "github-surface"
             )
-    if pulls:
+    if pulls and not _excepted(
+        policy, "github.pull-request", "github/pulls",
+        canonical_json(pulls), agent_material=False,
+    ):
         _add_github_finding(
             findings, "github.pull-request", "github-surface"
         )
@@ -2860,7 +2957,15 @@ def _surface_findings(
         values = _identity_items(
             _gh_list(repository, endpoint, runner), identity
         )
-        if values:
+        reviewed = (
+            rule_id == "github.release" and _release_reviewed(values, policy)
+        ) or (
+            rule_id == "github.issue" and _excepted(
+                policy, rule_id, "github/issues", canonical_json(values),
+                agent_material=False,
+            )
+        )
+        if values and not reviewed:
             _add_github_finding(
                 findings, rule_id, "github-surface"
             )
@@ -2874,7 +2979,7 @@ def _surface_findings(
         ),
         "id",
     )
-    if artifacts:
+    if artifacts and not _artifacts_reviewed(artifacts, policy):
         _add_github_finding(
             findings, "github.artifact", "github-surface"
         )
@@ -3001,12 +3106,12 @@ def _candidate_findings(
             or not _valid_github_sha(object_id)
         ):
             raise AuditInputError("GitHub candidate refs are invalid")
-        if not _remote_ref_matches(
+        if ref not in policy.review_branches and not _remote_ref_matches(
             repository, ref, object_id, runner
         ):
             candidate_valid = False
     for ref, object_id in expected_refs.items():
-        if not ref.startswith("refs/heads/"):
+        if not ref.startswith("refs/heads/") or ref in policy.review_branches:
             continue
         checks = _gh_list(
             repository,
@@ -3036,13 +3141,8 @@ def _candidate_findings(
             seen.add(check["id"])
             if check["name"] == policy.ci_check:
                 required_checks.append(check)
-        if len(required_checks) > 1:
-            raise AuditInputError(
-                "GitHub candidate check is ambiguous"
-            )
-        required_suite_id: int | None = None
-        if required_checks:
-            required_check = required_checks[0]
+        required_suite_ids: set[int] = set()
+        for required_check in required_checks:
             app = required_check.get("app")
             check_suite = required_check.get("check_suite")
             if (
@@ -3054,7 +3154,9 @@ def _candidate_findings(
                 raise AuditInputError(
                     "GitHub candidate producer is invalid"
                 )
-            required_suite_id = check_suite["id"]
+            if check_suite["id"] in required_suite_ids:
+                raise AuditInputError("GitHub candidate check is ambiguous")
+            required_suite_ids.add(check_suite["id"])
             if (
                 required_check["head_sha"] != object_id
                 or required_check["status"] != "completed"
@@ -3062,7 +3164,7 @@ def _candidate_findings(
                 or required_check["app"]["id"] != producer_app_id
             ):
                 candidate_valid = False
-        else:
+        if not required_checks:
             candidate_valid = False
         runs = _gh_list(
             repository,
@@ -3092,27 +3194,25 @@ def _candidate_findings(
                 and run["path"] == policy.ci_workflow
             ):
                 workflow_matches.append(run)
-        if len(workflow_matches) > 1:
-            raise AuditInputError(
-                "GitHub candidate workflow is ambiguous"
-            )
-        if workflow_matches:
-            workflow = workflow_matches[0]
+        workflow_suite_ids: set[int] = set()
+        for workflow in workflow_matches:
             if not _positive_integer(workflow.get("check_suite_id")):
                 raise AuditInputError(
                     "GitHub candidate workflow producer is invalid"
                 )
+            if workflow["check_suite_id"] in workflow_suite_ids:
+                raise AuditInputError("GitHub candidate workflow is ambiguous")
+            workflow_suite_ids.add(workflow["check_suite_id"])
             if (
                 workflow["status"] != "completed"
                 or workflow["conclusion"] != "success"
-                or required_suite_id is None
-                or workflow["check_suite_id"] != required_suite_id
+                or workflow["check_suite_id"] not in required_suite_ids
             ):
                 candidate_valid = False
-        else:
+        if not workflow_matches or workflow_suite_ids != required_suite_ids:
             candidate_valid = False
     for ref, object_id in expected_refs.items():
-        if not _remote_ref_matches(
+        if ref not in policy.review_branches and not _remote_ref_matches(
             repository, ref, object_id, runner
         ):
             candidate_valid = False
@@ -3165,6 +3265,7 @@ def inspect_github_identity(
     runner: Runner = run_github_command,
     *,
     expected_refs: Mapping[str, str] | None = None,
+    is_ancestor: Callable[[str, str], bool] | None = None,
 ) -> GitHubState:
     incomplete = GitHubState(
         "",
@@ -3195,7 +3296,15 @@ def inspect_github_identity(
         != {
             ref.removeprefix("refs/heads/")
             for ref in policy.public_branches
+            if ref not in policy.review_branches
         }
+        or not set(policy.review_branches) <= set(policy.public_branches)
+        or not policy.public_branches
+        or policy.public_branches[0] in policy.review_branches
+        or any(
+            ref.removeprefix("refs/heads/") in policy.protected_branches
+            for ref in policy.review_branches
+        )
         or not tag_languages_covered
     ):
         return incomplete
@@ -3210,7 +3319,8 @@ def inspect_github_identity(
             ref.removeprefix("refs/heads/")
             for ref in policy.public_branches
         }
-        if set(branches) != allowed_branches:
+        required_branches = set(policy.protected_branches)
+        if not required_branches <= set(branches) <= allowed_branches:
             _add_github_finding(findings, "github.ref")
         expected_default = policy.public_branches[
             0
@@ -3283,7 +3393,8 @@ def inspect_github_identity(
                 if ref.startswith("refs/tags/")
             }
             if (
-                expected_names != set(branches)
+                expected_names != allowed_branches
+                or not required_branches <= set(branches) <= expected_names
                 or expected_tags != set(tags)
             ):
                 candidate_findings = [
@@ -3299,6 +3410,23 @@ def inspect_github_identity(
                     runner,
                     controls.producer_app_id,
                 )
+                # A review upload publishes audited source so CI can run. It
+                # does not authorize updating a protected branch or release.
+                base = branches.get(expected_default)
+                for ref in policy.review_branches:
+                    candidate = expected_refs.get(ref)
+                    previous = branches.get(ref.removeprefix("refs/heads/"))
+                    if (
+                        is_ancestor is None
+                        or base is None
+                        or candidate is None
+                        or not is_ancestor(base, candidate)
+                        or (previous is not None and not is_ancestor(previous, candidate))
+                    ):
+                        candidate_findings.append(_github_finding(
+                            "github.candidate", "github-control"
+                        ))
+                        break
             for finding in candidate_findings:
                 findings.setdefault(finding.rule_id, finding)
         end_controls = _github_controls(repository, policy, runner)
@@ -3352,11 +3480,21 @@ def inspect_github(
             ),
             False,
         )
+    def is_ancestor(ancestor: str, descendant: str) -> bool:
+        result = _git_result(
+            snapshot.root, "merge-base", "--is-ancestor", ancestor, descendant,
+            repository_config=snapshot.git_config,
+        )
+        if result.returncode not in (0, 1):
+            raise AuditInputError("review candidate ancestry is unavailable")
+        return result.returncode == 0
+
     return inspect_github_identity(
         policy.repository,
         policy,
         runner,
         expected_refs=dict(snapshot.refs),
+        is_ancestor=is_ancestor,
     )
 
 
@@ -5814,6 +5952,11 @@ def report_payload(
             else "fail"
         ),
     }
+    if policy.review_branches:
+        payload["review_uploads"] = {
+            "refs": {ref: refs[ref] for ref in policy.review_branches},
+            "remote_ci": "required-before-merge",
+        }
     _validate_report_candidate(snapshot, policy)
     if _policy_bytes(snapshot.root, policy) != policy_payload:
         raise AuditInputError("policy changed during report generation")
@@ -5884,7 +6027,7 @@ def _validated_report(
     dict[str, str],
     dict[str, str]
 ]:
-    if set(report) != REPORT_KEYS or type(
+    if (set(report) - {"review_uploads"}) != REPORT_KEYS or type(
         report.get("schema_version")
     ) is not int or report["schema_version"] != 1:
         raise AuditInputError("report schema is invalid")
@@ -5914,6 +6057,20 @@ def _validated_report(
         ):
             raise AuditInputError("report refs are invalid")
         ref_payload[ref] = object_id
+    if "review_uploads" in report:
+        uploads = report["review_uploads"]
+        if (
+            not isinstance(uploads, dict)
+            or set(uploads) != {"refs", "remote_ci"}
+            or uploads["remote_ci"] != "required-before-merge"
+            or not isinstance(uploads["refs"], dict)
+            or not uploads["refs"]
+            or any(
+                not ref.startswith("refs/heads/") or refs.get(ref) != sha
+                for ref, sha in uploads["refs"].items()
+            )
+        ):
+            raise AuditInputError("review upload report is invalid")
     checks_value = report.get("checks")
     if not isinstance(checks_value, dict):
         raise AuditInputError("report checks are invalid")
@@ -6401,7 +6558,7 @@ permissions:
 jobs:
   safety:
     name: Public repository safety
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
@@ -6410,6 +6567,24 @@ jobs:
           persist-credentials: false
       - name: Remove checkout-installed Git LFS filters
         run: git config --local --remove-section filter.lfs
+      - name: Prepare declared public refs
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          refs = json.loads(Path('.public-repository-safety.json').read_text())['public_refs']
+          for ref in refs['branches'] + refs.get('review_branches', []):
+              if not isinstance(ref, str) or not ref.startswith('refs/heads/'):
+                  raise SystemExit('Invalid declared branch')
+              subprocess.run(['git', 'check-ref-format', ref], check=True)
+              present = subprocess.run(['git', 'show-ref', '--verify', '--quiet', ref])
+              if present.returncode == 1:
+                  source = 'refs/remotes/origin/' + ref.removeprefix('refs/heads/')
+                  subprocess.run(['git', 'branch', '--no-track', ref.removeprefix('refs/heads/'), source], check=True)
+              elif present.returncode != 0:
+                  raise SystemExit('Unable to inspect declared branch')
+          PY
       - name: Install pinned Gitleaks
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -6721,6 +6896,13 @@ def main_pre_push(
         }
         if not pushed_refs:
             return ExitCode.APPROVAL
+        if any(ref in policy.review_branches for ref in pushed_refs):
+            snapshot = resolve_repository(root, select_public_refs(root, policy), policy)
+            candidate = inspect_github(snapshot, policy, runner)
+            if not candidate.complete:
+                return ExitCode.INCOMPLETE_SURFACE
+            if candidate.findings or not candidate.candidate_bound:
+                return ExitCode.REMOTE_OR_PROTECTION
         try:
             report_digest = _private_report_digest(root)
         except AuditInputError:

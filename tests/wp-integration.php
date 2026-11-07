@@ -108,3 +108,28 @@ try {
 
 if ( $failures ) WP_CLI::error( count( $failures ) . ' of ' . $checks . ' integration checks failed.' );
 WP_CLI::success( $checks . ' integration checks passed.' );
+
+// Run with the add-on inactive: exercise its declared compatibility boundary
+// without changing installed vendor files or the site's WordPress version.
+if ( ! defined( 'AC_SEO_ACF_ANALYSIS_PLUGIN_FILE' ) ) {
+    $check( PsyDigital\BlockContentBridge\Plugin::conflict() === '', 'Yoast without the ACF add-on is supported.' );
+    $addon_file = wp_tempnam( 'bridge-addon-fixture' );
+    $original_version = $GLOBALS['wp_version'];
+    define( 'AC_SEO_ACF_ANALYSIS_PLUGIN_FILE', $addon_file );
+    try {
+        file_put_contents( $addon_file, "<?php\n/* Version: 3.2 */\n" );
+        $GLOBALS['wp_version'] = '7.0.3';
+        $check( PsyDigital\BlockContentBridge\Plugin::conflict() !== '', 'The ACF add-on remains paused before the always-iframed editor.' );
+        $GLOBALS['wp_version'] = '7.1.4';
+        $check( PsyDigital\BlockContentBridge\Plugin::conflict() === '', 'The verified add-on version may share an always-iframed editor.' );
+        file_put_contents( $addon_file, "<?php\n/* Version: 3.3 */\n" );
+        $check( PsyDigital\BlockContentBridge\Plugin::conflict() !== '', 'An unverified add-on update pauses sharing.' );
+    } finally {
+        $GLOBALS['wp_version'] = $original_version;
+        unlink( $addon_file );
+    }
+} else {
+    WP_CLI::warning( 'Compatibility boundary checks skipped: run with ACF Content Analysis inactive.' );
+}
+if ( $failures ) WP_CLI::error( count( $failures ) . ' of ' . $checks . ' integration checks failed.' );
+WP_CLI::success( $checks . ' total checks passed.' );

@@ -9,4 +9,10 @@ add_action( 'init', static function () {
         'fields' => [ [ 'key' => 'field_bcb_copy', 'label' => 'Copy', 'name' => 'copy', 'type' => 'textarea' ] ],
         'location' => [ [ [ 'param' => 'block', 'operator' => '==', 'value' => 'studio/card' ] ] ],
     ] );
+    acf_add_local_field_group( [
+        'key' => 'group_bcb_meta_fixture',
+        'title' => 'Separate editorial fields',
+        'fields' => [ [ 'key' => 'field_bcb_meta_copy', 'label' => 'Additional copy', 'name' => 'additional_copy', 'type' => 'text' ] ],
+        'location' => [ [ [ 'param' => 'post_type', 'operator' => '==', 'value' => 'post' ] ], [ [ 'param' => 'taxonomy', 'operator' => '==', 'value' => 'category' ] ] ],
+    ] );
 }, 20 );

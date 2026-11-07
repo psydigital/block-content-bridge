@@ -11,11 +11,16 @@
         const pluginName = 'PsyBlockContentBridge';
         let yoast = null;
         let timer = null;
+        let sharingAllowed = null;
         let status = { status: 'waiting', html: null, error: '', blocks: 0, excluded: 0 };
 
+        function canAnalyse() {
+            return !settings.acfCollector || global.PsyBlockBridge.canShareWithACF();
+        }
+
         function publish(state) {
-            status = state;
-            listeners.forEach(listener => listener(state));
+            status = canAnalyse() ? state : { ...state, status: 'paused', html: null, error: '' };
+            listeners.forEach(listener => listener(status));
             if (yoast) yoast.pluginReloaded(pluginName);
         }
 
@@ -31,6 +36,9 @@
         });
 
         function readEditor() {
+            const allowed = canAnalyse();
+            const layoutChanged = allowed !== sharingAllowed;
+            sharingAllowed = allowed;
             const editor = wp.data.select('core/editor');
             const id = editor.getCurrentPostId();
             if (!id) return;
@@ -39,7 +47,14 @@
                 content: editor.getEditedPostContent(),
                 title: editor.getEditedPostAttribute('title') || '',
             });
-            if (!changed) return;
+            // Edits still invalidate a previous render while sharing is paused.
+            if (!allowed) {
+                global.clearTimeout(timer);
+                if (layoutChanged && !changed) publish(controller.state());
+                return;
+            }
+            if (layoutChanged && !changed) publish(controller.state());
+            if (!changed && !layoutChanged) return;
             global.clearTimeout(timer);
             if (settings.refresh === 'auto') timer = global.setTimeout(() => controller.refresh(), 1200);
         }
@@ -47,7 +62,7 @@
         function refresh() {
             readEditor();
             global.clearTimeout(timer);
-            controller.refresh();
+            if (canAnalyse()) controller.refresh();
         }
 
         function Panel() {
@@ -64,13 +79,14 @@
                 loading: __('Rendering current editor content…', 'block-content-bridge'),
                 ready: __('Analysis content is up to date.', 'block-content-bridge'),
                 error: __('Analysis could not be updated. Yoast is using its normal content source.', 'block-content-bridge'),
+                paused: __('Analysis is paused while block fields are outside the editor canvas. Close block editing controls or reload the editor to resume.', 'block-content-bridge'),
             };
             return el(PluginDocumentSettingPanel, { name: 'psy-block-content-bridge', title: 'Block Content Bridge', initialOpen: true },
                 settings.conflict ? el(Notice, { status: 'warning', isDismissible: false }, settings.conflict) : el('div', null,
                     el('p', { role: 'status', 'aria-live': 'polite' }, messages[state.status] || messages.waiting),
                     state.error ? el(Notice, { status: 'error', isDismissible: false }, state.error) : null,
                     state.status === 'ready' ? el('p', null, sprintf(__('%1$d block instances processed; %2$d excluded.', 'block-content-bridge'), state.blocks, state.excluded)) : null,
-                    el(Button, { variant: 'secondary', onClick: refresh, disabled: !yoast || state.status === 'loading' }, __('Refresh analysis', 'block-content-bridge')),
+                    el(Button, { variant: 'secondary', onClick: refresh, disabled: !yoast || state.status === 'loading' || state.status === 'paused' }, __('Refresh analysis', 'block-content-bridge')),
                     el('p', null, __('Uses the current unsaved block content. This does not save or publish the post.', 'block-content-bridge')),
                     el(Button, { variant: 'link', onClick: () => setInspect(!inspect), 'aria-expanded': inspect }, inspect ? __('Hide collected content', 'block-content-bridge') : __('View collected content', 'block-content-bridge')),
                     inspect ? el(TextareaControl, { label: __('Collected HTML', 'block-content-bridge'), value: state.html === null ? '' : state.html, readOnly: true, rows: 10, help: __('This document is supplied to Yoast before any other custom analysis filters. It is not a preview of the public page.', 'block-content-bridge') }) : null
@@ -91,7 +107,7 @@
             }
             try {
                 app.registerPlugin(pluginName, { status: 'ready' });
-                app.registerModification('content', data => controller.content(data), pluginName, 5);
+                app.registerModification('content', data => canAnalyse() ? controller.content(data) : data, pluginName, 5);
                 yoast = app;
                 wp.data.subscribe(readEditor);
                 readEditor();
